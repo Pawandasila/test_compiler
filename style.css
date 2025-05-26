@@ -420,7 +420,34 @@ header p {
 
 .log-entry .timestamp {
     color: #6c757d;
-    font-size: 0.8rem;
+    font-weight: normal;
+}
+
+/* Log Source Styles */
+.log-entry .log-source {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.log-entry.client-log .log-source {
+    color: #007bff; /* Blue for client logs */
+}
+
+.log-entry.server-log .log-source {
+    color: #28a745; /* Green for server logs */
+}
+
+/* Enhanced log styling for better distinction */
+.log-entry.client-log {
+    border-left: 3px solid #007bff;
+    padding-left: 10px;
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+.log-entry.server-log {
+    border-left: 3px solid #28a745;
+    padding-left: 10px;
+    background-color: rgba(40, 167, 69, 0.05);
 }
 
 /* Responsive Design */

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Write, BufReader, BufRead};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, Shutdown};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -384,9 +384,7 @@ impl MediaServer {
         *self.is_playing.lock().unwrap() = true;
         
         println!("Playing: {}", filename);
-    }
-
-    pub fn pause_media(&self) {
+    }    pub fn pause_media(&self) {
         let command = Message::PauseCommand;
         
         // Broadcast to all connected clients
@@ -398,6 +396,33 @@ impl MediaServer {
         *self.is_playing.lock().unwrap() = false;
         
         println!("Media paused");
+    }
+
+    pub fn get_connected_clients(&self) -> Vec<(String, String)> {
+        let clients = self.clients.lock().unwrap();
+        clients
+            .iter()
+            .filter_map(|(client_id, stream)| {
+                if let Ok(addr) = stream.lock().unwrap().peer_addr() {
+                    Some((client_id.clone(), addr.to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }    pub fn disconnect_client(&self, client_id: &str) -> bool {
+        let mut clients = self.clients.lock().unwrap();
+        if let Some(client_stream) = clients.remove(client_id) {
+            // Try to close the connection gracefully
+            if let Ok(stream) = client_stream.lock() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+            println!("Disconnected client: {}", client_id);
+            true
+        } else {
+            println!("Client {} not found", client_id);
+            false
+        }
     }
 }
 

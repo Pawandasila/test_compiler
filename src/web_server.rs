@@ -5,6 +5,7 @@ use std::convert::Infallible;
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose};
+use chrono::Utc;
 
 use crate::{MediaServer, MediaClient};
 
@@ -28,11 +29,26 @@ pub struct FileInfo {
     pub media_type: String,
 }
 
+#[derive(Serialize, Clone)]
+pub struct ClientInfo {
+    pub id: String,
+    pub address: String,
+    pub connected_time: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct LogMessage {
+    pub timestamp: String,
+    pub level: String,
+    pub message: String,
+}
+
 pub struct WebServer {
     media_server: Arc<Mutex<Option<MediaServer>>>,
     media_client: Arc<Mutex<Option<MediaClient>>>,
     loaded_files: Arc<Mutex<Vec<FileInfo>>>,
     available_files: Arc<Mutex<Vec<String>>>,
+    log_messages: Arc<Mutex<Vec<LogMessage>>>,
 }
 
 impl WebServer {
@@ -42,8 +58,30 @@ impl WebServer {
             media_client: Arc::new(Mutex::new(None)),
             loaded_files: Arc::new(Mutex::new(Vec::new())),
             available_files: Arc::new(Mutex::new(Vec::new())),
+            log_messages: Arc::new(Mutex::new(Vec::new())),
         }
-    }    pub async fn start_web_server(self) -> Result<(), Box<dyn std::error::Error>> {
+    }
+
+    fn add_log_message(&self, level: &str, message: &str) {
+        let timestamp = Utc::now().format("%H:%M:%S").to_string();
+        let log_message = LogMessage {
+            timestamp: timestamp.clone(),
+            level: level.to_string(),
+            message: message.to_string(),
+        };
+        
+        let mut logs = self.log_messages.lock().unwrap();
+        logs.push(log_message);
+        
+        // Keep only the last 100 log messages to prevent memory buildup
+        if logs.len() > 100 {
+            logs.remove(0);
+        }
+          // Also print to console for debugging
+        println!("[{}] {}: {}", timestamp, level, message);
+    }
+
+    pub async fn start_web_server(self) -> Result<(), Box<dyn std::error::Error>> {
         let web_server = Arc::new(self);
         let port = 3000; // Default port
         
@@ -147,10 +185,12 @@ async fn serve_js() -> Result<impl Reply, warp::Rejection> {
 async fn handle_api_request(
     request: WebRequest,
     web_server: Arc<WebServer>,
-) -> Result<impl Reply, warp::Rejection> {
-    let response = match request.command.as_str() {
+) -> Result<impl Reply, warp::Rejection> {    let response = match request.command.as_str() {
         "start-server" => handle_start_server(request.params, &web_server).await,
         "stop-server" => handle_stop_server(&web_server).await,
+        "get-connected-clients" => handle_get_connected_clients(&web_server).await,
+        "get-logs" => handle_get_logs(&web_server).await,
+        "disconnect-specific-client" => handle_disconnect_specific_client(request.params, &web_server).await,
         "connect-client" => handle_connect_client(request.params, &web_server).await,
         "disconnect-client" => handle_disconnect_client(&web_server).await,
         "request-media" => handle_request_media(request.params, &web_server).await,
@@ -172,12 +212,13 @@ async fn handle_start_server(
     let port = params["port"].as_u64().unwrap_or(8080) as u16;
     let directory = params["directory"].as_str().unwrap_or("").to_string();
 
-    // Debug logging
-    println!("Raw params: {}", params);
-    println!("Extracted directory: '{}'", directory);
-    println!("Directory length: {}", directory.len());
+    // Add log messages to the web interface
+    web_server.add_log_message("INFO", &format!("Raw params: {}", params));
+    web_server.add_log_message("INFO", &format!("Extracted directory: '{}'", directory));
+    web_server.add_log_message("INFO", &format!("Directory length: {}", directory.len()));
 
     if directory.is_empty() {
+        web_server.add_log_message("ERROR", "Directory path is required");
         return WebResponse {
             success: false,
             error: Some("Directory path is required".to_string()),
@@ -187,7 +228,7 @@ async fn handle_start_server(
 
     // Remove any surrounding quotes if they exist
     let cleaned_directory = directory.trim_matches('"').trim();
-    println!("Cleaned directory: '{}'", cleaned_directory);
+    web_server.add_log_message("INFO", &format!("Cleaned directory: '{}'", cleaned_directory));
 
     let server = MediaServer::new();
     match server.load_media_path(cleaned_directory) {
@@ -205,6 +246,9 @@ async fn handle_start_server(
                     .collect()
             };
             
+            // Get connected clients info (initially empty since server just started)
+            let clients: Vec<ClientInfo> = Vec::new();
+            
             *web_server.loaded_files.lock().unwrap() = files.clone();
             
             // Clone server for background task before storing
@@ -212,6 +256,11 @@ async fn handle_start_server(
             
             // Store server reference
             *web_server.media_server.lock().unwrap() = Some(server);
+            
+            // Add success log messages
+            web_server.add_log_message("INFO", &format!("Media server started on port {}", port));
+            web_server.add_log_message("INFO", "Waiting for clients to connect...");
+            web_server.add_log_message("INFO", &format!("Loaded {} media file(s)", files.len()));
             
             // Start server in background
             tokio::spawn(async move {
@@ -224,26 +273,113 @@ async fn handle_start_server(
                 success: true,
                 error: None,
                 data: Some(serde_json::json!({
-                    "files": files
+                    "files": files,
+                    "clients": clients
                 })),
             }
         }
-        Err(e) => WebResponse {
-            success: false,
-            error: Some(format!("Failed to load media files: {}", e)),
-            data: None,
-        },
+        Err(e) => {
+            web_server.add_log_message("ERROR", &format!("Failed to load media files: {}", e));
+            WebResponse {
+                success: false,
+                error: Some(format!("Failed to load media files: {}", e)),
+                data: None,
+            }
+        }
     }
 }
 
 async fn handle_stop_server(web_server: &Arc<WebServer>) -> WebResponse {
+    web_server.add_log_message("INFO", "Stopping media server...");
     *web_server.media_server.lock().unwrap() = None;
     web_server.loaded_files.lock().unwrap().clear();
+    web_server.add_log_message("INFO", "Media server stopped successfully");
 
     WebResponse {
         success: true,
         error: None,
         data: None,
+    }
+}
+
+async fn handle_get_connected_clients(web_server: &Arc<WebServer>) -> WebResponse {
+    if let Some(server) = web_server.media_server.lock().unwrap().as_ref() {
+        let connected_clients_data = server.get_connected_clients();
+        let clients: Vec<ClientInfo> = connected_clients_data
+            .iter()
+            .map(|(id, address)| ClientInfo {
+                id: id.clone(),
+                address: address.clone(),
+                connected_time: Utc::now().format("%H:%M:%S").to_string(),
+            })
+            .collect();
+
+        WebResponse {
+            success: true,
+            error: None,
+            data: Some(serde_json::json!({
+                "clients": clients
+            })),
+        }
+    } else {
+        WebResponse {
+            success: false,
+            error: Some("Server is not running".to_string()),
+            data: None,
+        }
+    }
+}
+
+async fn handle_get_logs(web_server: &Arc<WebServer>) -> WebResponse {
+    let logs = web_server.log_messages.lock().unwrap().clone();
+    WebResponse {
+        success: true,
+        error: None,
+        data: Some(serde_json::json!({
+            "logs": logs
+        })),
+    }
+}
+
+async fn handle_disconnect_specific_client(
+    params: serde_json::Value,
+    web_server: &Arc<WebServer>,
+) -> WebResponse {
+    let client_id = params["clientId"].as_str().unwrap_or("").to_string();
+
+    if client_id.is_empty() {
+        return WebResponse {
+            success: false,
+            error: Some("Client ID is required".to_string()),
+            data: None,
+        };
+    }
+
+    if let Some(server) = web_server.media_server.lock().unwrap().as_ref() {
+        let disconnected = server.disconnect_client(&client_id);
+        
+        if disconnected {
+            web_server.add_log_message("INFO", &format!("Client {} disconnected", client_id));
+            WebResponse {
+                success: true,
+                error: None,
+                data: Some(serde_json::json!({
+                    "message": format!("Client {} disconnected", client_id)
+                })),
+            }
+        } else {
+            WebResponse {
+                success: false,
+                error: Some(format!("Client {} not found", client_id)),
+                data: None,
+            }
+        }
+    } else {
+        WebResponse {
+            success: false,
+            error: Some("Server is not running".to_string()),
+            data: None,
+        }
     }
 }
 

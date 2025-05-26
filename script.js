@@ -8,6 +8,7 @@ class MediaSyncApp {
         this.loadedFiles = [];
         this.availableFiles = [];
         this.connectedClients = [];
+        this.clientRefreshTimer = null;
         
         this.initializeElements();
         this.setupEventListeners();
@@ -50,7 +51,8 @@ class MediaSyncApp {
         this.fileInputFiles = document.getElementById('file-input-files');
     }
 
-    setupEventListeners() {        // Server events
+    setupEventListeners() {
+        // Server events
         this.startServerBtn.addEventListener('click', () => this.startServer());
         this.stopServerBtn.addEventListener('click', () => this.stopServer());
         this.browseDirectoryBtn.addEventListener('click', () => this.browseDirectory());
@@ -67,11 +69,88 @@ class MediaSyncApp {
         // Media player events
         this.playBtn.addEventListener('click', () => this.playMedia());
         this.pauseBtn.addEventListener('click', () => this.pauseMedia());
-        this.stopBtn.addEventListener('click', () => this.stopMedia());        // Utility events
+        this.stopBtn.addEventListener('click', () => this.stopMedia());
+
+        // Utility events
         this.clearLogBtn.addEventListener('click', () => this.clearLog());
         this.fileInput.addEventListener('change', (e) => this.handleFileSelection(e, 'general'));
         this.fileInputDirectory.addEventListener('change', (e) => this.handleFileSelection(e, 'directory'));
         this.fileInputFiles.addEventListener('change', (e) => this.handleFileSelection(e, 'files'));
+    }
+
+    startServerLogRefresh() {
+        // Start refreshing server logs and connected clients every 2 seconds
+        if (this.clientRefreshTimer) {
+            clearInterval(this.clientRefreshTimer);
+        }
+        
+        this.clientRefreshTimer = setInterval(() => {
+            this.refreshServerLogs();
+            this.refreshConnectedClients();
+        }, 2000);
+        
+        // Also refresh immediately
+        this.refreshServerLogs();
+        this.refreshConnectedClients();
+    }
+
+    stopServerLogRefresh() {
+        if (this.clientRefreshTimer) {
+            clearInterval(this.clientRefreshTimer);
+            this.clientRefreshTimer = null;
+        }
+    }
+
+    async refreshServerLogs() {
+        try {
+            const response = await this.callRustCommand('get-logs', {});
+            
+            if (response.success && response.data && response.data.logs) {
+                this.displayServerLogs(response.data.logs);
+            }
+        } catch (error) {
+            // Don't log errors for log refresh to avoid spam
+            console.debug('Failed to refresh server logs:', error.message);
+        }
+    }
+
+    async refreshConnectedClients() {
+        try {
+            const response = await this.callRustCommand('get-connected-clients', {});
+            
+            if (response.success && response.data && response.data.clients) {
+                this.connectedClients = response.data.clients;
+                this.updateConnectedClients();
+            }
+        } catch (error) {
+            // Don't log errors for client refresh to avoid spam
+            console.debug('Failed to refresh connected clients:', error.message);
+        }
+    }
+
+    displayServerLogs(serverLogs) {
+        // Get existing log entries to avoid duplicates
+        const existingEntries = Array.from(this.statusLog.querySelectorAll('.log-entry'));
+        const existingServerLogs = existingEntries.filter(entry => 
+            entry.classList.contains('server-log')
+        );
+
+        // Clear existing server logs
+        existingServerLogs.forEach(entry => entry.remove());
+
+        // Add new server logs
+        serverLogs.forEach(log => {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry server-log ${log.level.toLowerCase()}`;
+            logEntry.innerHTML = `
+                <span class="timestamp">[${log.timestamp}]</span> 
+                <span class="log-source">[SERVER]</span> ${log.message}
+            `;
+            
+            this.statusLog.appendChild(logEntry);
+        });
+        
+        this.statusLog.scrollTop = this.statusLog.scrollHeight;
     }
 
     setupTabSwitching() {
@@ -143,6 +222,7 @@ class MediaSyncApp {
                 this.updateLoadedFiles();
                 this.showNotification('Server started successfully', 'success');
                 this.logMessage('Server started successfully', 'success');
+                this.startServerLogRefresh();
             } else {
                 throw new Error(response.error || 'Failed to start server');
             }
@@ -167,6 +247,7 @@ class MediaSyncApp {
                 this.updateConnectedClients();
                 this.showNotification('Server stopped', 'info');
                 this.logMessage('Server stopped', 'info');
+                this.stopServerLogRefresh();
             } else {
                 throw new Error(response.error || 'Failed to stop server');
             }
@@ -410,8 +491,7 @@ class MediaSyncApp {
                         <div class="file-name">${client.id}</div>
                         <div class="file-size">Connected: ${client.connectedTime}</div>
                     </div>
-                    <div class="file-actions">
-                        <button class="btn btn-sm btn-danger" onclick="app.disconnectClient('${client.id}')">
+                    <div class="file-actions">                        <button class="btn btn-sm btn-danger" onclick="app.disconnectSpecificClient('${client.id}')">
                             Disconnect
                         </button>
                     </div>
@@ -767,23 +847,20 @@ class MediaSyncApp {
         
         return pathLikePatterns.some(pattern => pattern.test(path)) || 
                (hasPathSeparators && isLongEnough);
-    }
-
-    // UI Utility Methods
+    }    // UI Utility Methods
     logMessage(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = document.createElement('div');
-        logEntry.className = `log-entry ${type}`;
+        logEntry.className = `log-entry client-log ${type}`;
         logEntry.innerHTML = `
-            <span class="timestamp">[${timestamp}]</span> ${message}
+            <span class="timestamp">[${timestamp}]</span> 
+            <span class="log-source">[CLIENT]</span> ${message}
         `;
         
         this.statusLog.appendChild(logEntry);
         this.statusLog.scrollTop = this.statusLog.scrollHeight;
-    }
-
-    clearLog() {
-        this.statusLog.innerHTML = '<p class="log-entry">Log cleared</p>';
+    }    clearLog() {
+        this.statusLog.innerHTML = '<p class="log-entry client-log"><span class="log-source">[CLIENT]</span> Log cleared</p>';
     }
 
     showNotification(message, type = 'info') {
