@@ -228,9 +228,14 @@ async fn handle_start_server(
 
     // Remove any surrounding quotes if they exist
     let cleaned_directory = directory.trim_matches('"').trim();
-    web_server.add_log_message("INFO", &format!("Cleaned directory: '{}'", cleaned_directory));
-
-    let server = MediaServer::new();
+    web_server.add_log_message("INFO", &format!("Cleaned directory: '{}'", cleaned_directory));    let server = MediaServer::new();
+    
+    // Set up status callback to capture MediaServer logs
+    let web_server_clone = Arc::clone(&web_server);
+    server.set_status_callback(move |message| {
+        web_server_clone.add_log_message("INFO", &message);
+    });
+    
     match server.load_media_path(cleaned_directory) {
         Ok(_) => {
             // Get loaded files info

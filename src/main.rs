@@ -48,15 +48,31 @@ pub struct MediaServer {
     clients: Arc<Mutex<HashMap<String, Arc<Mutex<TcpStream>>>>>,
     current_media: Arc<Mutex<Option<String>>>,
     is_playing: Arc<Mutex<bool>>,
+    status_callback: Arc<Mutex<Option<Box<dyn Fn(String) + Send + Sync>>>>,
 }
 
-impl MediaServer {
-    pub fn new() -> Self {
+impl MediaServer {    pub fn new() -> Self {
         Self {
             media_files: Arc::new(Mutex::new(HashMap::new())),
             clients: Arc::new(Mutex::new(HashMap::new())),
             current_media: Arc::new(Mutex::new(None)),
             is_playing: Arc::new(Mutex::new(false)),
+            status_callback: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn set_status_callback<F>(&self, callback: F)
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        let mut status_callback = self.status_callback.lock().unwrap();
+        *status_callback = Some(Box::new(callback));
+    }
+
+    fn log_status(&self, message: &str) {
+        println!("{}", message);
+        if let Some(ref callback) = *self.status_callback.lock().unwrap() {
+            callback(message.to_string());
         }
     }
 
@@ -167,12 +183,10 @@ impl MediaServer {
         }
         
         Ok(())
-    }
-
-    pub fn start_server(&self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    }    pub fn start_server(&self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
-        println!("Media server started on port {}", port);
-        println!("Waiting for clients to connect...");
+        self.log_status(&format!("Media server started on port {}", port));
+        self.log_status("Waiting for clients to connect...");
 
         for stream in listener.incoming() {
             match stream {
@@ -181,9 +195,10 @@ impl MediaServer {
                     let clients = Arc::clone(&self.clients);
                     let current_media = Arc::clone(&self.current_media);
                     let is_playing = Arc::clone(&self.is_playing);
+                    let status_callback = Arc::clone(&self.status_callback);
                     
                     thread::spawn(move || {
-                        Self::handle_client(stream, media_files, clients, current_media, is_playing);
+                        Self::handle_client(stream, media_files, clients, current_media, is_playing, status_callback);
                     });
                 }
                 Err(e) => {
@@ -193,17 +208,20 @@ impl MediaServer {
         }
         
         Ok(())
-    }
-
-    fn handle_client(
+    }    fn handle_client(
         stream: TcpStream,
         media_files: Arc<Mutex<HashMap<String, MediaFile>>>,
         clients: Arc<Mutex<HashMap<String, Arc<Mutex<TcpStream>>>>>,
         current_media: Arc<Mutex<Option<String>>>,
         is_playing: Arc<Mutex<bool>>,
+        status_callback: Arc<Mutex<Option<Box<dyn Fn(String) + Send + Sync>>>>,
     ) {
         let peer_addr = stream.peer_addr().unwrap_or_else(|_| "unknown".parse().unwrap());
-        println!("New client connected: {}", peer_addr);
+        
+        // Log status through callback
+        if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+            callback(format!("New client connected: {}", peer_addr));
+        }
         
         let stream = Arc::new(Mutex::new(stream));
         let mut reader = BufReader::new(stream.lock().unwrap().try_clone().unwrap());
@@ -213,8 +231,9 @@ impl MediaServer {
             let mut line = String::new();
             match reader.read_line(&mut line) {
                 Ok(0) => {
-                    println!("Client {} disconnected", peer_addr);
-                    // Remove client from clients list
+                    if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+                        callback(format!("Client {} disconnected", peer_addr));
+                    }
                     if !client_id.is_empty() {
                         clients.lock().unwrap().remove(&client_id);
                     }
@@ -239,6 +258,7 @@ impl MediaServer {
                             &clients,
                             &current_media,
                             &is_playing,
+                            &status_callback,
                         );
                     } else {
                         eprintln!("Failed to parse message: {}", line);
@@ -254,15 +274,14 @@ impl MediaServer {
                 }
             }
         }
-    }
-
-    fn process_message(
+    }    fn process_message(
         message: Message,
         stream: &Arc<Mutex<TcpStream>>,
         media_files: &Arc<Mutex<HashMap<String, MediaFile>>>,
         clients: &Arc<Mutex<HashMap<String, Arc<Mutex<TcpStream>>>>>,
         current_media: &Arc<Mutex<Option<String>>>,
         is_playing: &Arc<Mutex<bool>>,
+        status_callback: &Arc<Mutex<Option<Box<dyn Fn(String) + Send + Sync>>>>,
     ) {
         match message {
             Message::Join { client_id } => {
@@ -270,7 +289,10 @@ impl MediaServer {
                     client_id: client_id.clone() 
                 };
                 Self::send_message(stream, &response);
-                println!("Client {} joined", client_id);
+                
+                if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+                    callback(format!("Client {} joined", client_id));
+                }
             }
             
             Message::RequestMediaList => {
@@ -288,7 +310,9 @@ impl MediaServer {
                         .unwrap()
                         .as_secs();
                     
-                    println!("Client requested media: {} ({} bytes)", filename, media_file.data.len());
+                    if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+                        callback(format!("Client requested media: {} ({} bytes)", filename, media_file.data.len()));
+                    }
                     
                     // Send media data to the requesting client
                     let response = Message::MediaData {
@@ -298,7 +322,9 @@ impl MediaServer {
                         timestamp,
                     };
                     
-                    println!("Sending media data to CLIENT for: {} ({} bytes)", filename, media_file.data.len());
+                    if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+                        callback(format!("Sending media data to CLIENT for: {} ({} bytes)", filename, media_file.data.len()));
+                    }
                     Self::send_message(stream, &response);
                     
                     // Set as current media and start playing
@@ -309,7 +335,9 @@ impl MediaServer {
                     if let Err(e) = Self::play_media_on_host(&media_file.filename, &media_file.data, &media_file.media_type) {
                         eprintln!("Error playing media on host: {}", e);
                     } else {
-                        println!("Started playing {} on HOST", filename);
+                        if let Some(callback) = status_callback.lock().unwrap().as_ref() {
+                            callback(format!("Started playing {} on HOST", filename));
+                        }
                     }
                     
                     // Send play command to all OTHER clients (not the requesting one)
