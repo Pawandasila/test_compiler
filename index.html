@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Sync - Server & Client</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Media Sync Software</h1>
+            <p>Synchronize and stream media files across multiple devices</p>
+        </header>
+
+        <div class="tab-container">
+            <div class="tabs">
+                <button class="tab-button active" data-tab="server">Server</button>
+                <button class="tab-button" data-tab="client">Client</button>
+            </div>
+
+            <!-- Server Tab -->
+            <div id="server" class="tab-content active">
+                <div class="card">
+                    <h2>Media Server</h2>
+                    
+                    <div class="form-group">
+                        <label for="server-port">Port:</label>
+                        <input type="number" id="server-port" value="8080" min="1024" max="65535">
+                    </div>                    <div class="form-group">
+                        <label for="media-directory">Media Directory/Files:</label>
+                        <div class="input-group">
+                            <input type="text" id="media-directory" placeholder="Enter path or select files/folder...">
+                            <button id="browse-files" class="btn btn-secondary">Select Files</button>
+                            <button id="browse-directory" class="btn btn-secondary">Select Folder</button>
+                        </div>                        <small class="help-text">
+                            • <strong>Recommended:</strong> Click "Select Folder" to choose an entire directory<br>
+                            • <strong>Manual Entry:</strong> Type full directory path (e.g., C:\Users\YourName\Pictures)<br>
+                            • <strong>Individual Files:</strong> Click "Select Files" (you'll need to enter the directory path manually)<br>
+                            • <strong>Quick Test:</strong> Click "Use Test Media" to use sample files
+                        </small>
+                        <div class="quick-actions" style="margin-top: 10px;">
+                            <button id="use-test-media" class="btn btn-sm btn-warning">Use Test Media</button>
+                            <button id="test-browse" class="btn btn-sm btn-secondary">Test Browse</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <button id="start-server" class="btn btn-primary">Start Server</button>
+                        <button id="stop-server" class="btn btn-danger" disabled>Stop Server</button>
+                    </div>
+
+                    <div class="status-group">
+                        <div class="status-indicator">
+                            <span class="status-dot" id="server-status-dot"></span>
+                            <span id="server-status-text">Server Stopped</span>
+                        </div>
+                    </div>
+
+                    <div class="media-files-section">
+                        <h3>Loaded Media Files</h3>
+                        <div id="loaded-files" class="file-list">
+                            <p class="empty-state">No media files loaded</p>
+                        </div>
+                    </div>
+
+                    <div class="connected-clients-section">
+                        <h3>Connected Clients</h3>
+                        <div id="connected-clients" class="client-list">
+                            <p class="empty-state">No clients connected</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Client Tab -->
+            <div id="client" class="tab-content">
+                <div class="card">
+                    <h2>Media Client</h2>
+                    
+                    <div class="form-group">
+                        <label for="server-address">Server Address:</label>
+                        <input type="text" id="server-address" value="127.0.0.1:8080" placeholder="ip:port">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="client-id">Client ID:</label>
+                        <input type="text" id="client-id" value="client1" placeholder="Enter unique client ID">
+                    </div>
+
+                    <div class="form-group">
+                        <button id="connect-client" class="btn btn-primary">Connect</button>
+                        <button id="disconnect-client" class="btn btn-danger" disabled>Disconnect</button>
+                    </div>
+
+                    <div class="status-group">
+                        <div class="status-indicator">
+                            <span class="status-dot" id="client-status-dot"></span>
+                            <span id="client-status-text">Disconnected</span>
+                        </div>
+                    </div>
+
+                    <div class="available-files-section">
+                        <h3>Available Media Files</h3>
+                        <div id="available-files" class="file-list">
+                            <p class="empty-state">Connect to server to see available files</p>
+                        </div>
+                    </div>
+
+                    <div class="media-player-section">
+                        <h3>Media Player</h3>
+                        <div id="media-player" class="media-player">
+                            <div class="player-placeholder">
+                                <p>No media loaded</p>
+                            </div>
+                        </div>
+                        <div class="player-controls">
+                            <button id="play-btn" class="btn btn-success" disabled>Play</button>
+                            <button id="pause-btn" class="btn btn-warning" disabled>Pause</button>
+                            <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Messages -->
+        <div class="status-messages">
+            <h3>Status Messages</h3>
+            <div id="status-log" class="log-container">
+                <p class="log-entry">Application started</p>
+            </div>
+            <button id="clear-log" class="btn btn-secondary btn-sm">Clear Log</button>
+        </div>
+    </div>
+
+    <!-- File Input (Hidden) -->
+    <!-- Hidden file inputs for different selection modes -->
+    <input type="file" id="file-input-directory" webkitdirectory multiple style="display: none;">
+    <input type="file" id="file-input-files" multiple accept="video/*,audio/*,image/*" style="display: none;">
+    <input type="file" id="file-input" multiple accept="video/*,audio/*,image/*" style="display: none;">
+
+    <script src="script.js"></script>
+</body>
+</html>
