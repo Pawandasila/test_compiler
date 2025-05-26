@@ -553,7 +553,28 @@ class MediaSyncApp {
             }
         } catch (error) {
             this.logMessage(`Failed to disconnect: ${error.message}`, 'error');
-            this.showNotification(`Failed to disconnect: ${error.message}`, 'error');
+            this.showNotification(`Failed to disconnect: ${error.message}`, 'error');        }
+    }
+
+    async disconnectSpecificClient(clientId) {
+        try {
+            this.logMessage(`Disconnecting client ${clientId}...`, 'info');
+            
+            const response = await this.callRustCommand('disconnect-specific-client', {
+                clientId: clientId
+            });
+
+            if (response.success) {
+                this.showNotification(`Client ${clientId} disconnected`, 'info');
+                this.logMessage(`Client ${clientId} disconnected successfully`, 'info');
+                // Refresh the connected clients list
+                this.refreshConnectedClients();
+            } else {
+                throw new Error(response.error || 'Failed to disconnect client');
+            }
+        } catch (error) {
+            this.logMessage(`Failed to disconnect client: ${error.message}`, 'error');
+            this.showNotification(`Failed to disconnect client: ${error.message}`, 'error');
         }
     }
 
